@@ -33,7 +33,7 @@ class MainActivity : ComponentActivity() {
         setContent { MaterialTheme(colorScheme=lightColorScheme(primary=Color(0xFF28796C),background=Color(0xFFF6F7F3))) { App(viewModel()) } }
     }
 }
-val roles = linkedMapOf("大肥鱼" to "🐟", "小福子" to "👑", "糯米" to "🐱", "阿算盘" to "🧮", "自定义" to "✨")
+val roles = linkedMapOf("大肥鱼" to "🐟", "Claude·大小姐" to "🍊", "小福子" to "👑", "糯米" to "🐱", "阿算盘" to "🧮", "自定义" to "✨")
 fun receipt(role: String, count: Int) = when(role) {
     "小福子" -> "启禀陛下，$count 笔开销已录入御账，请陛下过目。"
     "糯米" -> "喵，主人！$count 笔账记好啦，摸摸我的小脑袋吧。"
@@ -144,6 +144,6 @@ fun receipt(role: String, count: Int) = when(role) {
         item {Button(enabled=!loading,onClick={try {val base=address();val url=java.net.URL(base);require(url.protocol=="https"&&url.userInfo==null&&url.query==null&&url.ref==null){"请检查 HTTPS 地址"};require(model.isNotBlank()){ "请先选择模型" };val key=credential();require(key.isNotBlank()){ "请填写 API Key" };s.token=key;s.endpoint=base;s.model=model.trim();s.persona=persona;token="";notify("设置已保存：${s.model}")}catch(e:Exception){status=e.message ?: "保存失败"}}){Text("保存设置")}}
         item {TextButton(onClick={s.token="";notify("API 密钥已清除")}){Text("清除密钥")}}
         item {Row {TextButton(onClick={export.launch("yuji-backup.json")}){Text("导出账本")};TextButton(onClick={restore.launch(arrayOf("application/json"))}){Text("恢复账本")}}}
-        item {Text("大肥鱼记账 0.4.3 · 本地优先\n截图识别尚未开放。退款、转账和对话修改暂不自动执行，请通过账单编辑操作。")}
+        item {Text("大肥鱼记账 0.4.4 · 本地优先\n截图识别尚未开放。退款、转账和对话修改暂不自动执行，请通过账单编辑操作。")}
     }
 }
