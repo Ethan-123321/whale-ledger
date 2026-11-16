@@ -80,25 +80,41 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     fail(source, "识别失败 · " + requestError(e))
                     return@launch
                 }
+                var savedReply:ChatMessage?=null
+                var savedBills:List<Bill> = emptyList()
+                var repeatFact:String?=null
                 try {
                     withContext(Dispatchers.IO) {
                         val bills = result.bills.map(products::suggestCategory)
                         store.finish(source, bills, result.draft) {
                             if (prepared.preference != null) products.remember(source, prepared.preference)
                             val repeat = bills.firstNotNullOfOrNull { products.repeatReply(it, source, mode) }
-                            val response = when {
-                                bills.isEmpty() -> result.reply
-                                repeat != null -> receipt(source.role, bills.size) + "\n" + repeat
-                                result.reply.isBlank() -> receipt(source.role, bills.size)
-                                else -> receipt(source.role, bills.size) + "\n" + result.reply
-                            }
-                            ChatMessage(text = response, role = source.role, user = false)
+                            repeatFact=repeat
+                            savedBills=bills
+                            ChatMessage(text = if(bills.isEmpty())result.reply else "已入账 ${bills.size} 笔。", role = source.role, user = false).also {savedReply=it}
                         }
                     }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
                     fail(source, "保存失败 · 账单尚未保存，请重试。")
+                    return@launch
+                }
+                refresh()
+                // Reply generation cannot change the committed transaction or enable transaction retry.
+                if(savedBills.isNotEmpty() && savedReply!=null) {
+                    try {
+                        val config=settings.config().copy(role=source.role)
+                        if(config.endpoint.isNotBlank()&&config.model.isNotBlank()&&config.token.isNotBlank()) {
+                            withContext(Dispatchers.IO) {
+                                val history=store.context(source).filter {it.id!=savedReply!!.id}
+                                val memory=products.preferences().take(10).joinToString("\n"){it.text}
+                                val reply=Ai.respond(config,source,savedBills,history,memory,repeatFact)
+                                store.updateReply(savedReply!!.id,reply)
+                            }
+                        }
+                    } catch(e:CancellationException) {throw e}
+                    catch(_:Exception) { /* Keep the already persisted factual confirmation. */ }
                 }
             } catch (e: CancellationException) {
                 throw e

@@ -65,6 +65,9 @@ class ChatStore(private val ledger: Ledger) {
     fun updateStatus(id: String, status: String) {
         db.execSQL("UPDATE messages SET status=? WHERE id=?", arrayOf(status, id))
     }
+    fun updateReply(id:String,text:String) {
+        db.execSQL("UPDATE messages SET body=? WHERE id=? AND user=0",arrayOf(text,id))
+    }
 
     fun canRetry(id: String): Boolean = db.rawQuery(
         "SELECT id,status FROM messages WHERE user=1 ORDER BY rowid DESC LIMIT 1", null
