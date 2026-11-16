@@ -2,7 +2,7 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id(
 android {
     namespace = "com.yuji.app"
     compileSdk = 35
-    defaultConfig { applicationId = "com.yuji.app"; minSdk = 26; targetSdk = 35; versionCode = 2; versionName = "0.2.0" }
+    defaultConfig { applicationId = "com.yuji.app"; minSdk = 26; targetSdk = 35; versionCode = 4; versionName = "0.4.0"; testInstrumentationRunner = "com.yuji.app.LedgerChecks" }
     buildFeatures { compose = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
@@ -15,4 +15,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.core:core-ktx:1.13.1")
+    androidTestImplementation("androidx.collection:collection-jvm:1.4.4")
 }
