@@ -75,6 +75,7 @@ fun receipt(role: String, count: Int) = when(role) {
     }
     if (manage == "categories") CategoryManager(model) { manage = "" }
     if (manage == "memory") MemoryManager(model, bills) { manage = "" }
+    if (manage == "recurring") RecurringPage(model) { manage = "" }
     if(adding||editor!=null) BillEditor(editor, model.categories.custom(),onDismiss={adding=false;editor=null},onSave={b -> try {ledger.writableDatabase.atomic {
         ledger.save(listOf(b))
         if (editor?.category != null && editor?.category != b.category) model.products.correctCategory(b)
@@ -121,6 +122,7 @@ fun receipt(role: String, count: Int) = when(role) {
     LazyColumn(contentPadding=PaddingValues(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
         item { TextButton(onClick = { manage("categories") }) { Text("管理自定义分类") } }
         item { TextButton(onClick = { manage("memory") }) { Text("记忆与偏好") } }
+        item { TextButton(onClick = { manage("recurring") }) { Text("固定收入与支出 · 查看待确认") } }
         item {Text("选择记账搭子",style=MaterialTheme.typography.titleLarge)}
         items(roles.entries.toList()) { e -> FilterChip(selected=role==e.key,onClick={onRole(e.key)},label={Text("${e.value} ${e.key}")}) }
         item {OutlinedTextField(persona,{persona=it},label={Text("自定义人设")},modifier=Modifier.fillMaxWidth())}
@@ -142,6 +144,6 @@ fun receipt(role: String, count: Int) = when(role) {
         item {Button(enabled=!loading,onClick={try {val base=address();val url=java.net.URL(base);require(url.protocol=="https"&&url.userInfo==null&&url.query==null&&url.ref==null){"请检查 HTTPS 地址"};require(model.isNotBlank()){ "请先选择模型" };val key=credential();require(key.isNotBlank()){ "请填写 API Key" };s.token=key;s.endpoint=base;s.model=model.trim();s.persona=persona;token="";notify("设置已保存：${s.model}")}catch(e:Exception){status=e.message ?: "保存失败"}}){Text("保存设置")}}
         item {TextButton(onClick={s.token="";notify("API 密钥已清除")}){Text("清除密钥")}}
         item {Row {TextButton(onClick={export.launch("yuji-backup.json")}){Text("导出账本")};TextButton(onClick={restore.launch(arrayOf("application/json"))}){Text("恢复账本")}}}
-        item {Text("大肥鱼记账 0.4.0 · 本地优先\n截图识别尚未开放。退款、转账和对话修改暂不自动执行，请通过账单编辑操作。")}
+        item {Text("大肥鱼记账 0.4.1 · 本地优先\n截图识别尚未开放。退款、转账和对话修改暂不自动执行，请通过账单编辑操作。")}
     }
 }

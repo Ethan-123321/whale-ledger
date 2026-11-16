@@ -15,10 +15,10 @@ fun parseCents(value: String): Long {
     return cents
 }
 fun money(cents: Long) = BigDecimal.valueOf(cents, 2).toPlainString()
-class Ledger(context: Context, databaseName: String = "ledger.db") : SQLiteOpenHelper(context, databaseName, null, 3) {
+class Ledger(context: Context, databaseName: String = "ledger.db") : SQLiteOpenHelper(context, databaseName, null, 4) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE bills(id TEXT PRIMARY KEY, title TEXT NOT NULL, cents INTEGER NOT NULL CHECK(cents>0), income INTEGER NOT NULL, category TEXT NOT NULL, date TEXT NOT NULL)")
-        onUpgrade(db, 1, 3)
+        onUpgrade(db, 1, 4)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -27,6 +27,10 @@ class Ledger(context: Context, databaseName: String = "ledger.db") : SQLiteOpenH
             db.chatSchema()
         }
         if (oldVersion < 3) db.productSchema()
+        if (oldVersion < 4) {
+            db.execSQL("CREATE TABLE recurring(id TEXT PRIMARY KEY,title TEXT,cents INTEGER,income INTEGER,category TEXT,day INTEGER,start TEXT,enabled INTEGER)")
+            db.execSQL("CREATE TABLE recurring_done(rule TEXT,month TEXT,PRIMARY KEY(rule,month))")
+        }
     }
     fun list(): List<Bill> = readableDatabase.rawQuery("SELECT id,title,cents,income,category,date FROM bills ORDER BY date DESC,rowid DESC", null).use { c -> buildList { while(c.moveToNext()) add(Bill(c.getString(0),c.getString(1),c.getLong(2),c.getInt(3)==1,c.getString(4),c.getString(5))) } }
     fun save(bills: List<Bill>) {
