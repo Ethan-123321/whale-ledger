@@ -1,4 +1,4 @@
-# 鱼记 Android
+# 大肥鱼记账 Android
 
 角色陪伴记账的 Android 首版，Kotlin / Compose，最低 Android 8。
 
@@ -11,7 +11,7 @@
 - JSON 账本导出和合并恢复；聊天最近 100 条本地保存。
 
 ## 使用
-设置中填写基础地址（例如服务商提供的 https://host/v1）、模型和密钥，再保存。应用追加 /chat/completions。文字和人设会发送给该服务商，不会发送整个账本。不配置 API 也能手动记账。AI 可能识别错误，请核对卡片并编辑/撤销。
+选择 DeepSeek，粘贴 API Key，点击“连接并获取模型”，选择模型后保存。其他兼容平台请选择“自定义”并填写基础地址。平台不支持模型列表时可展开手动输入。应用追加 /chat/completions。文字和人设会发送给该服务商，不会发送整个账本。不配置 API 也能手动记账。AI 可能识别错误，请核对卡片并编辑/撤销。
 
 ## 构建
 JDK 17、Android SDK 35、Gradle 8.9。Android Studio 打开根目录，设置 SDK 后运行 app。

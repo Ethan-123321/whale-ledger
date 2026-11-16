@@ -57,7 +57,7 @@ fun receipt(role: String, count: Int) = when(role) {
     LaunchedEffect(messages.size,busy) { settings.history=JSONArray().apply {messages.takeLast(100).forEach {put(JSONObject().put("text",it.text).put("user",it.user))}}.toString() }
     val scope = rememberCoroutineScope()
     fun refresh() { bills=ledger.list() }
-    Scaffold(topBar={ TopAppBar(title={ Column { Text(if(tab==0) "${roles[role]} $role" else listOf("","我的账本","消费统计","角色与设置")[tab]); Text("鱼记 · 让每一笔都有回应",style=MaterialTheme.typography.labelSmall) } },actions={ TextButton(onClick={ adding=true }) { Text("＋ 记一笔") } }) },bottomBar={ NavigationBar { listOf("对话","账本","统计","设置").forEachIndexed { i,s -> NavigationBarItem(selected=tab==i,onClick={tab=i},icon={Text(listOf("◉","▤","◷","⚙")[i])},label={Text(s)}) } } }) { padding ->
+    Scaffold(topBar={ TopAppBar(title={ Column { Text(if(tab==0) "${roles[role]} $role" else listOf("","我的账本","消费统计","角色与设置")[tab]); Text("大肥鱼记账 · 让每一笔都有回应",style=MaterialTheme.typography.labelSmall) } },actions={ TextButton(onClick={ adding=true }) { Text("＋ 记一笔") } }) },bottomBar={ NavigationBar { listOf("对话","账本","统计","设置").forEachIndexed { i,s -> NavigationBarItem(selected=tab==i,onClick={tab=i},icon={Text(listOf("◉","▤","◷","⚙")[i])},label={Text(s)}) } } }) { padding ->
         Column(Modifier.padding(padding).fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             if(notice.isNotEmpty()) { TextButton(onClick={notice=""}) { Text(notice) } }
             removed?.let { b -> TextButton(onClick={ledger.save(listOf(b));refresh();removed=null;notice="已恢复账单"}) {Text("已撤销 ${b.title} · 点击恢复")} }
@@ -123,17 +123,41 @@ fun receipt(role: String, count: Int) = when(role) {
     val export=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri -> if(uri!=null)runCatching {context.contentResolver.openOutputStream(uri)!!.bufferedWriter().use {it.write(Backup.encode(ledger.list()))}}.onSuccess {notify("账本已导出，不包含密钥和聊天记录")}.onFailure {notify("导出失败")} }
     val restore=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {uri -> if(uri!=null)runCatching {val raw=context.contentResolver.openInputStream(uri)!!.bufferedReader().use {it.readText()};ledger.save(Backup.decode(raw))}.onSuccess {notify("账本已合并恢复，相同 ID 不重复导入")}.onFailure {notify("恢复失败：备份格式或数据无效")} }
     var endpoint by remember {mutableStateOf(s.endpoint)};var model by remember {mutableStateOf(s.model)};var token by remember {mutableStateOf("")};var persona by remember {mutableStateOf(s.persona)}
+    var provider by remember {mutableStateOf(if(s.endpoint.isBlank() || s.endpoint.trimEnd('/') in listOf("https://api.deepseek.com","https://api.deepseek.com/v1")) "DeepSeek" else "自定义")}
+    var loading by remember {mutableStateOf(false)}
+    var models by remember {mutableStateOf<List<String>>(emptyList())}
+    var manual by remember {mutableStateOf(false)}
+    var expanded by remember {mutableStateOf(false)}
+    var status by remember {mutableStateOf("")}
+    val scope=rememberCoroutineScope()
+    fun address()=if(provider=="DeepSeek") "https://api.deepseek.com" else endpoint.trim().trimEnd('/')
+    fun credential():String {
+        if(token.isNotBlank()) return token.trim()
+        require(address()==s.endpoint.trim().trimEnd('/')) {"更换平台或地址后，请重新填写对应的密钥"}
+        return s.token
+    }
     LazyColumn(contentPadding=PaddingValues(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
         item {Text("选择记账搭子",style=MaterialTheme.typography.titleLarge)}
         items(roles.entries.toList()) { e -> FilterChip(selected=role==e.key,onClick={onRole(e.key)},label={Text("${e.value} ${e.key}")}) }
         item {OutlinedTextField(persona,{persona=it},label={Text("自定义人设")},modifier=Modifier.fillMaxWidth())}
         item {Text("自带 AI 接口",style=MaterialTheme.typography.titleLarge);Text("启用 AI 后，输入文字将发送到下方服务商。账本保存在本机；请勿填写不信任的地址。")}
-        item {OutlinedTextField(endpoint,{endpoint=it},label={Text("API 基础地址（含 /v1）")},placeholder={Text("https://example.com/v1")},modifier=Modifier.fillMaxWidth())}
-        item {OutlinedTextField(model,{model=it},label={Text("模型名称")},modifier=Modifier.fillMaxWidth())}
-        item {OutlinedTextField(token,{token=it},label={Text("API Key（留空保留原密钥）")},visualTransformation=PasswordVisualTransformation(),modifier=Modifier.fillMaxWidth())}
-        item {Button(onClick={try {require(endpoint.isBlank()||java.net.URL(endpoint).protocol=="https");s.endpoint=endpoint.trim();s.model=model.trim();s.persona=persona;if(token.isNotBlank())s.token=token.trim();token="";notify("设置已保存")}catch(e:Exception){notify("保存失败，请检查 HTTPS 地址")}}){Text("保存设置")}}
+        item {Text("1 · 选择服务商");Row {listOf("DeepSeek","自定义").forEach {p->FilterChip(selected=provider==p,enabled=!loading,onClick={provider=p;models=emptyList();model="";token="";status=""},label={Text(p)},modifier=Modifier.padding(end=8.dp))}}}
+        if(provider=="自定义") item {OutlinedTextField(endpoint,{endpoint=it;models=emptyList();model=""},enabled=!loading,label={Text("HTTPS 基础地址")},placeholder={Text("https://example.com/v1")},modifier=Modifier.fillMaxWidth())}
+        else item {Text("已自动配置 DeepSeek 官方接口")}
+        item {OutlinedTextField(token,{token=it;models=emptyList()},enabled=!loading,label={Text("2 · API Key（同一地址留空保留密钥）")},visualTransformation=PasswordVisualTransformation(),modifier=Modifier.fillMaxWidth())}
+        item {Button(enabled=!loading,onClick={
+            scope.launch {
+                loading=true;status="正在获取模型…"
+                try {val base=address();val key=credential();val found=withContext(Dispatchers.IO){Ai.models(base,key)};models=found;if(model !in found)model="";status="连接成功，获取到 ${found.size} 个模型，请选择";expanded=true}
+                catch(e:Exception){status=when(e){is java.net.SocketTimeoutException->"连接超时，请检查网络后重试";is java.net.UnknownHostException->"无法连接服务商，请检查网络和地址";else->e.message ?: "获取失败，请检查网络或手动输入模型"}}
+                finally {loading=false}
+            }
+        }){Text(if(loading) "连接中…" else "连接并获取模型")};if(status.isNotBlank())Text(status)}
+        item {Text("3 · 选择模型");Box {OutlinedButton(enabled=models.isNotEmpty()&&!loading,onClick={expanded=true}){Text(model.ifBlank {"请选择模型"})};DropdownMenu(expanded=expanded,onDismissRequest={expanded=false}){models.forEach {id->DropdownMenuItem(text={Text(id)},onClick={model=id;expanded=false})}}};TextButton(onClick={manual=!manual}){Text(if(manual) "收起手动输入" else "平台不支持？手动输入模型")}}
+        if(manual) item {OutlinedTextField(model,{model=it},enabled=!loading,label={Text("模型 ID")},modifier=Modifier.fillMaxWidth())}
+        item {Button(enabled=!loading,onClick={try {val base=address();val url=java.net.URL(base);require(url.protocol=="https"&&url.userInfo==null&&url.query==null&&url.ref==null){"请检查 HTTPS 地址"};require(model.isNotBlank()){ "请先选择模型" };val key=credential();require(key.isNotBlank()){ "请填写 API Key" };s.token=key;s.endpoint=base;s.model=model.trim();s.persona=persona;token="";notify("设置已保存：${s.model}")}catch(e:Exception){status=e.message ?: "保存失败"}}){Text("保存设置")}}
         item {TextButton(onClick={s.token="";notify("API 密钥已清除")}){Text("清除密钥")}}
         item {Row {TextButton(onClick={export.launch("yuji-backup.json")}){Text("导出账本")};TextButton(onClick={restore.launch(arrayOf("application/json"))}){Text("恢复账本")}}}
-        item {Text("鱼记 0.1 · 本地优先\n截图识别尚未开放。退款、转账和对话修改暂不自动执行，请通过账单编辑操作。")}
+        item {Text("大肥鱼记账 0.2.0 · 本地优先\n截图识别尚未开放。退款、转账和对话修改暂不自动执行，请通过账单编辑操作。")}
     }
 }
