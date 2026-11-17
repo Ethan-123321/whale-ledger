@@ -4,7 +4,9 @@
 
 ## 试用
 
-安装 `dafeiyu-0.4.6-debug.apk` 后，试着输入「午饭 28 元」「昨天地铁 4 元」或「工资到账 5000」。开发目录的安装包位于 `artifacts/`，GitHub 首发时用 Release 附件分发。
+**[下载 Android 安装包（0.4.6 开发预览版）](https://github.com/Ethan-123321/whale-ledger/releases/download/v0.4.6/dafeiyu-0.4.6-debug.apk)** · [查看版本说明](https://github.com/Ethan-123321/whale-ledger/releases/tag/v0.4.6)
+
+安装后，试着输入「午饭 28 元」「昨天地铁 4 元」或「工资到账 5000」。从本地项目试用时，也可以在 `artifacts/` 找到安装包。
 
 - 常见的明确收支可离线识别和分类。账单卡片支持编辑、撤销，自定义分类可重复使用。
 - 重要信息有歧义时，角色会追问。试试「午饭 28 或 32，记不清了」，或者在五分钟内重复发送同一笔。待确认项会保存在原消息下方，可选择金额、确认另记一笔或取消。
