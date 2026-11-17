@@ -4,7 +4,7 @@
 
 ## 试用
 
-**[下载 Android 安装包（0.4.6 开发预览版）](https://github.com/Ethan-123321/whale-ledger/releases/download/v0.4.6/dafeiyu-0.4.6-debug.apk)** · [查看版本说明](https://github.com/Ethan-123321/whale-ledger/releases/tag/v0.4.6)
+**[下载 Android 安装包（v0.4.6）](https://github.com/Ethan-123321/whale-ledger/releases/download/v0.4.6/dafeiyu-0.4.6-debug.apk)** · [查看版本说明](https://github.com/Ethan-123321/whale-ledger/releases/tag/v0.4.6)
 
 安装后，试着输入「午饭 28 元」「昨天地铁 4 元」或「工资到账 5000」。从本地项目试用时，也可以在 `artifacts/` 找到安装包。
 
