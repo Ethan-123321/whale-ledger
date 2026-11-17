@@ -22,6 +22,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var busy by mutableStateOf(false)
         private set
+    var reviewError by mutableStateOf("")
+        private set
     val migrationIssue = runCatching { store.migrate(settings.history) }.exceptionOrNull() != null
 
     fun refresh() { revision++ }
@@ -32,8 +34,23 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val source = retry ?: ChatMessage(text = text.trim().take(2000), role = settings.role, user = true,
             date = sent.toLocalDate().toString(), sentAt = sent.toInstant().toEpochMilli(), status = "sending")
         busy = true
+        reviewError = ""
         viewModelScope.launch {
             try {
+                if (retry == null) {
+                    val review = withContext(Dispatchers.IO) { store.latestReviews().singleOrNull() }
+                    val answer = review?.draft?.answer(source.text)
+                    if (review != null && answer != null) {
+                        try {
+                            completeReview(review, answer, source)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            reviewError = "处理失败，待确认账单还在，可以重试。"
+                        }
+                        return@launch
+                    }
+                }
                 withContext(Dispatchers.IO) {
                     if (retry == null) store.insert(source) else store.updateStatus(source.id, "sending")
                 }
@@ -42,18 +59,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 val capture = settings.capturePreferences
                 val prepared = withContext(Dispatchers.IO) {
                     val custom = categories.custom()
-                    val draft = store.draft()
                     val today = LocalDate.parse(requireNotNull(source.date))
                     val expense = custom.filter { !it.income }.map { it.name }.toSet()
                     val income = custom.filter { it.income }.map { it.name }.toSet()
                     val requested = explicitPreference(source.text)
                     val preference = requested?.takeIf { capture }
                     val local = when {
-                        requested == null -> TransactionReader.read(source.text, today, draft, expense, income)
+                        requested == null -> TransactionReader.read(source.text, today, null, expense, income)
                         preference != null -> TransactionInput.Respond("我记下了。你可以在「记忆与偏好」里修改或删除。")
                         else -> TransactionInput.Respond("偏好自动保存已关闭，可以在「记忆与偏好」里开启。")
                     }
-                    Prepared(local, draft, expense, income, preference)
+                    Prepared(local, expense, income, preference)
                 }
                 val result = try {
                     when (val local = prepared.input) {
@@ -66,7 +82,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                 val memory = products.preferences().take(10).joinToString("\n") { it.text }
                                 val history = store.context(source).filter { !it.user || explicitPreference(it.text) == null }
                                 val parsed = Ai.parse(config.copy(role = source.role), source, history,
-                                    prepared.draft, prepared.expense, prepared.income, memory)
+                                    null, prepared.expense, prepared.income, memory)
                                 val date = LocalDate.parse(requireNotNull(source.date))
                                 require(parsed.bills.none { LocalDate.parse(it.date).isAfter(date) } &&
                                     parsed.draft?.date?.isAfter(date) != true) { "模型返回了未来日期，请核对交易时间。" }
@@ -83,15 +99,47 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 var savedReply:ChatMessage?=null
                 var savedBills:List<Bill> = emptyList()
                 var repeatFact:String?=null
+                var question: PendingReview? = null
+                var hasPending = false
                 try {
                     withContext(Dispatchers.IO) {
-                        val bills = result.bills.map(products::suggestCategory)
-                        store.finish(source, bills, result.draft) {
+                        val classified = if (prepared.input is TransactionInput.Record &&
+                            result.bills.any { it.category == Categories.fallback(it.income) }
+                        ) {
+                            try {
+                                Ai.classify(settings.config(), result.bills, prepared.expense, prepared.income)
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (_: Exception) {
+                                result.bills
+                            }
+                        } else result.bills
+                        val candidates = classified.map(products::suggestCategory)
+                        val explicitRepeat = candidates.size == 1 &&
+                            Regex("又买了|另买了|再记一笔").containsMatchIn(source.text)
+                        val duplicates = if (explicitRepeat) emptyMap() else store.recentDuplicates(candidates, source.sentAt)
+                        val bills = candidates.filterNot { it.id in duplicates }
+                        val drafts = listOfNotNull(result.draft) +
+                            (prepared.input as? TransactionInput.Record)?.drafts.orEmpty() +
+                            candidates.mapNotNull { bill ->
+                                duplicates[bill.id]?.let { original -> duplicateDraft(bill, original) }
+                            }
+                        store.finish(source, bills, drafts) {
                             if (prepared.preference != null) products.remember(source, prepared.preference)
                             val repeat = bills.firstNotNullOfOrNull { products.repeatReply(it, source, mode) }
                             repeatFact=repeat
                             savedBills=bills
-                            ChatMessage(text = if(bills.isEmpty())result.reply else "已入账 ${bills.size} 笔。", role = source.role, user = false).also {savedReply=it}
+                            hasPending = drafts.isNotEmpty()
+                            question = drafts.singleOrNull()?.let { PendingReview(source.id, source.role, it) }
+                            val confirmation = if (bills.isEmpty()) "" else "已入账 ${bills.size} 笔。"
+                            val next = when {
+                                question != null -> reviewQuestion(requireNotNull(question))
+                                drafts.isNotEmpty() -> "还有 ${drafts.size} 笔需要核对，请逐笔确认下面的内容。"
+                                bills.isEmpty() -> result.reply
+                                else -> ""
+                            }
+                            ChatMessage(text = listOf(confirmation, next).filter(String::isNotBlank).joinToString("\n"),
+                                role = source.role, user = false, date = source.date).also {savedReply=it}
                         }
                     }
                 } catch (e: CancellationException) {
@@ -102,19 +150,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 refresh()
                 // Reply generation cannot change the committed transaction or enable transaction retry.
-                if(savedBills.isNotEmpty() && savedReply!=null) {
-                    try {
-                        val config=settings.config().copy(role=source.role)
-                        if(config.endpoint.isNotBlank()&&config.model.isNotBlank()&&config.token.isNotBlank()) {
-                            withContext(Dispatchers.IO) {
-                                val history=store.context(source).filter {it.id!=savedReply!!.id}
-                                val memory=products.preferences().take(10).joinToString("\n"){it.text}
-                                val reply=Ai.respond(config,source,savedBills,history,memory,repeatFact)
-                                store.updateReply(savedReply!!.id,reply)
-                            }
+                val reply = savedReply
+                val pending = question
+                if (reply != null && pending != null) {
+                    optionalAi {
+                        val wording = Ai.phraseQuestion(settings.config().copy(role = source.role), reviewQuestion(pending))
+                        if (wording != null) {
+                            val prefix = if (savedBills.isEmpty()) "" else "已入账 ${savedBills.size} 笔。\n"
+                            store.updateReply(reply.id, prefix + wording)
                         }
-                    } catch(e:CancellationException) {throw e}
-                    catch(_:Exception) { /* Keep the already persisted factual confirmation. */ }
+                    }
+                } else if (reply != null && savedBills.isNotEmpty() && !hasPending) {
+                    respondToSaved(source, reply, savedBills, repeatFact)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -124,6 +171,83 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 busy = false
                 refresh()
             }
+        }
+    }
+
+    fun answerReview(id: String, text: String) {
+        if (busy) return
+        busy = true
+        reviewError = ""
+        viewModelScope.launch {
+            try {
+                val review = withContext(Dispatchers.IO) { store.review(id) } ?: return@launch
+                val answer = review.draft.answer(text)
+                if (answer == null) {
+                    reviewError = "请填写有效金额，最多两位小数。"
+                    return@launch
+                }
+                completeReview(review, answer, ChatMessage(text = text, role = review.role, user = true))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                reviewError = "处理失败，待确认账单还在，可以重试。"
+            } finally {
+                busy = false
+                refresh()
+            }
+        }
+    }
+
+    private suspend fun completeReview(review: PendingReview, answer: ReviewAnswer, source: ChatMessage) {
+        val draft = review.draft
+        val confirmation = source.copy(role = review.role)
+        val (reply, saved) = withContext(Dispatchers.IO) {
+            val bill = if (answer is ReviewAnswer.Save) {
+                val custom = categories.custom().filter { it.income == answer.income }.map { it.name }.toSet()
+                products.suggestCategory(Bill(title = draft.title, cents = answer.cents, income = answer.income,
+                    category = Categories.normalize(draft.title, draft.category, answer.income, custom),
+                    date = draft.date.toString()))
+            } else null
+            val original = if (bill != null && draft.kind != ReviewKind.DUPLICATE) {
+                store.recentDuplicates(listOf(bill), source.sentAt)[bill.id]
+            } else null
+            val next = if (bill != null && original != null) duplicateDraft(bill, original) else null
+            val saved = bill.takeIf { next == null }
+            val text = when {
+                next != null -> reviewQuestion(PendingReview(confirmation.id, review.role, next))
+                saved != null -> "已入账 1 笔。"
+                draft.kind == ReviewKind.DUPLICATE -> "这次未新增账单。"
+                else -> "已取消这笔待确认账单。"
+            }
+            val reply = ChatMessage(text = text, role = review.role, user = false, date = source.date)
+            if (store.resolveReview(review.id, confirmation, saved, next, reply)) reply to saved
+            else null to null
+        }
+        refresh()
+        if (reply != null && saved != null) respondToSaved(confirmation, reply, listOf(saved), null)
+    }
+
+    private fun duplicateDraft(bill: Bill, original: Bill) =
+        TransactionDraft(bill.title, bill.income, LocalDate.parse(bill.date), ReviewKind.DUPLICATE, bill.cents,
+            duplicateId = original.id, category = bill.category)
+
+    private suspend fun respondToSaved(source: ChatMessage, reply: ChatMessage, bills: List<Bill>, repeat: String?) =
+        optionalAi {
+            val config = settings.config().copy(role = source.role)
+            if (config.endpoint.isNotBlank() && config.model.isNotBlank() && config.token.isNotBlank()) {
+                val history = store.context(source).filter { it.id != reply.id }
+                val memory = products.preferences().take(10).joinToString("\n") { it.text }
+                store.updateReply(reply.id, Ai.respond(config, source, bills, history, memory, repeat))
+            }
+        }
+
+    private suspend fun optionalAi(block: () -> Unit) {
+        try {
+            withContext(Dispatchers.IO) { block() }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // The saved reply remains available when the model request fails.
         }
     }
 
@@ -147,7 +271,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (text.startsWith("请记住") || text.startsWith("记住")) match.groupValues[1] else match.value
     }
 
-    private data class Prepared(val input: TransactionInput, val draft: TransactionDraft?,
+    private data class Prepared(val input: TransactionInput,
         val expense: Set<String>, val income: Set<String>, val preference: String?)
 }
 

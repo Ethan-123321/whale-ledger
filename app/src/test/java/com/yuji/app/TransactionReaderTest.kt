@@ -34,6 +34,35 @@ class TransactionReaderTest {
         assertTrue(recorded("工资到账5000").single().income)
     }
 
+    @Test fun classifiesColaAndIceCreamCakeFromShortEntries() {
+        val bills = recorded("无糖可乐 4 元，冰激凌蛋糕22")
+        assertEquals(listOf("餐饮/饮料", "餐饮/甜点"), bills.map { it.category })
+        assertEquals(listOf(400L, 2200L), bills.map { it.cents })
+        assertEquals("餐饮/奶茶咖啡", recorded("奶茶 12").single().category)
+    }
+
+    @Test fun alternativesAndClearEntriesAreHandledIndividually() {
+        val entry = read("地铁4元，午饭 28 或 32，记不清了") as TransactionInput.Record
+        assertEquals(400L, entry.bills.single().cents)
+        val draft = entry.drafts.single()
+        assertEquals(listOf(2800L, 3200L), draft.choices)
+        assertEquals(ReviewAnswer.Save(3200L, false), draft.answer("32 元"))
+        assertNull(draft.answer("30"))
+        assertEquals(ReviewAnswer.Dismiss, draft.answer("算了"))
+    }
+
+    @Test fun unclearAmountDirectionAndOccurrenceBecomeDrafts() {
+        assertEquals(ReviewKind.AMOUNT, (read("午饭吃了牛肉面") as TransactionInput.Clarify).draft.kind)
+        val approximate = (read("午饭大概 28 元") as TransactionInput.Clarify).draft
+        assertEquals(TransactionDraft("午饭", false, today), approximate)
+        val direction = (read("报销 80 不确定是收入还是支出") as TransactionInput.Clarify).draft
+        assertEquals(ReviewKind.DIRECTION, direction.kind)
+        assertEquals(ReviewAnswer.Save(8000L, true), direction.answer("收入"))
+        val occurrence = (read("好像花了午饭 28") as TransactionInput.Clarify).draft
+        assertEquals(ReviewKind.OCCURRENCE, occurrence.kind)
+        assertEquals(ReviewAnswer.Dismiss, occurrence.answer("还没发生"))
+    }
+
     @Test fun draftPreservesDateAndNewTransactionTakesPrecedence() {
         val draft = (read("昨天买了耳机") as TransactionInput.Clarify).draft
         assertTrue(read("是的", draft) is TransactionInput.Clarify)

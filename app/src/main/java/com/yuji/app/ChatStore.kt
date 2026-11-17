@@ -25,6 +25,24 @@ internal fun SQLiteDatabase.chatSchema() {
     execSQL("CREATE TABLE migrations(name TEXT PRIMARY KEY)")
 }
 
+internal fun SQLiteDatabase.reviewSchema() {
+    execSQL("""
+        CREATE TABLE pending_reviews(
+            id TEXT PRIMARY KEY, source TEXT NOT NULL, title TEXT NOT NULL, income INTEGER NOT NULL,
+            day TEXT NOT NULL, kind TEXT NOT NULL, cents INTEGER, choices TEXT NOT NULL,
+            duplicate_id TEXT, category TEXT NOT NULL
+        )
+    """.trimIndent())
+    execSQL("CREATE INDEX pending_reviews_source ON pending_reviews(source)")
+    execSQL("CREATE INDEX messages_sent_at ON messages(sent_at)")
+    execSQL("""
+        INSERT INTO pending_reviews
+        SELECT source,source,title,income,day,'AMOUNT',NULL,'',NULL,'' FROM transaction_drafts
+        WHERE source IN (SELECT id FROM messages)
+    """.trimIndent())
+    execSQL("DROP TABLE transaction_drafts")
+}
+
 internal inline fun <T> SQLiteDatabase.atomic(block: () -> T): T {
     beginTransaction()
     try {
@@ -73,11 +91,57 @@ class ChatStore(private val ledger: Ledger) {
         "SELECT id,status FROM messages WHERE user=1 ORDER BY rowid DESC LIMIT 1", null
     ).use { it.moveToFirst() && it.getString(0) == id && it.getString(1) == "failed" }
 
-    fun draft(): TransactionDraft? = db.rawQuery("SELECT title,income,day FROM transaction_drafts", null).use {
-        if (it.moveToFirst()) TransactionDraft(it.getString(0), it.getInt(1) != 0, LocalDate.parse(it.getString(2))) else null
+    fun reviews(messages: List<ChatMessage>): Map<String, List<PendingReview>> =
+        messages.chunked(200).flatMap { page ->
+            val placeholders = page.joinToString(",") { "?" }
+            readReviews("r.source IN ($placeholders)", page.map { it.id }.toTypedArray())
+        }.groupBy { it.sourceId }
+
+    fun latestReviews(): List<PendingReview> =
+        readReviews("r.source = (SELECT id FROM messages WHERE user=1 ORDER BY rowid DESC LIMIT 1)", emptyArray())
+
+    private fun readReviews(where: String, args: Array<String>): List<PendingReview> = db.rawQuery("""
+        SELECT r.id,r.source,m.role,r.title,r.income,r.day,r.kind,r.cents,r.choices,r.duplicate_id,r.category
+        FROM pending_reviews r JOIN messages m ON m.id=r.source WHERE $where ORDER BY r.rowid
+    """.trimIndent(), args).use { cursor ->
+        buildList {
+            while (cursor.moveToNext()) add(PendingReview(
+                id = cursor.getString(0), sourceId = cursor.getString(1), role = cursor.getString(2),
+                draft = TransactionDraft(
+                    cursor.getString(3), cursor.getInt(4) != 0, LocalDate.parse(cursor.getString(5)),
+                    ReviewKind.valueOf(cursor.getString(6)), if (cursor.isNull(7)) null else cursor.getLong(7),
+                    cursor.getString(8).split(',').mapNotNull(String::toLongOrNull),
+                    cursor.getString(9), cursor.getString(10)
+                )
+            ))
+        }
     }
 
-    fun finish(source: ChatMessage, bills: List<Bill>, draft: TransactionDraft?, reply: () -> ChatMessage) = db.atomic {
+    fun recentDuplicates(bills: List<Bill>, sentAt: Long?): Map<String, Bill> {
+        if (sentAt == null || bills.isEmpty()) return emptyMap()
+        val recent = db.rawQuery("""
+            SELECT DISTINCT b.id,b.title,b.cents,b.income,b.category,b.date
+            FROM bills b JOIN message_bill_links l ON l.bill_id=b.id JOIN messages m ON m.id=l.message_id
+            WHERE m.sent_at BETWEEN ? AND ?
+            ORDER BY m.sent_at DESC
+        """.trimIndent(), arrayOf((sentAt - 5 * 60 * 1000).toString(), sentAt.toString())).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) add(Bill(cursor.getString(0), cursor.getString(1), cursor.getLong(2),
+                    cursor.getInt(3) != 0, cursor.getString(4), cursor.getString(5)))
+            }
+        }
+        return buildMap {
+            for (bill in bills) {
+                val key = ProductNames.key(bill.title)
+                recent.firstOrNull {
+                    it.cents == bill.cents && it.date == bill.date && it.income == bill.income &&
+                        ProductNames.key(it.title) == key
+                }?.let { put(bill.id, it) }
+            }
+        }
+    }
+
+    fun finish(source: ChatMessage, bills: List<Bill>, drafts: List<TransactionDraft>, reply: () -> ChatMessage) = db.atomic {
         val pending = db.rawQuery("SELECT status FROM messages WHERE id=?", arrayOf(source.id)).use {
             it.moveToFirst() && it.getString(0) == "sending"
         }
@@ -86,19 +150,30 @@ class ChatStore(private val ledger: Ledger) {
         for (bill in bills) {
             db.execSQL("INSERT INTO message_bill_links VALUES(?,?)", arrayOf(source.id, bill.id))
         }
-        db.delete("transaction_drafts", null, null)
-        if (draft != null) {
-            db.execSQL("INSERT INTO transaction_drafts VALUES(1,?,?,?,?)",
-                arrayOf(draft.title, if (draft.income) 1 else 0, draft.date.toString(), source.id))
+        for (draft in drafts) {
+            val review = PendingReview(source.id, source.role, draft)
+            db.execSQL("INSERT INTO pending_reviews VALUES(?,?,?,?,?,?,?,?,?,?)", arrayOf(
+                review.id, source.id, draft.title, if (draft.income) 1 else 0, draft.date.toString(),
+                draft.kind.name, draft.cents, draft.choices.joinToString(","), draft.duplicateId, draft.category
+            ))
         }
         insert(reply())
         updateStatus(source.id, "done")
     }
 
+    fun review(id: String): PendingReview? = readReviews("r.id=?", arrayOf(id)).singleOrNull()
+
+    fun resolveReview(id: String, source: ChatMessage, bill: Bill?, replacement: TransactionDraft?, reply: ChatMessage): Boolean = db.atomic {
+        if (db.delete("pending_reviews", "id=?", arrayOf(id)) == 0) return@atomic false
+        insert(source.copy(status = "sending"))
+        finish(source, listOfNotNull(bill), listOfNotNull(replacement)) { reply }
+        true
+    }
+
     fun deleteDay(day: String) = db.atomic {
         val where = if (day == LEGACY_DAY) "day IS NULL" else "day = ?"
         val args = if (day == LEGACY_DAY) emptyArray() else arrayOf(day)
-        db.execSQL("DELETE FROM transaction_drafts WHERE source IN (SELECT id FROM messages WHERE $where)", args)
+        db.execSQL("DELETE FROM pending_reviews WHERE source IN (SELECT id FROM messages WHERE $where)", args)
         db.execSQL("DELETE FROM message_bill_links WHERE message_id IN (SELECT id FROM messages WHERE $where)", args)
         db.delete("messages", where, args)
         Unit

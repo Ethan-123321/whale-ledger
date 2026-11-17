@@ -6,3 +6,6 @@ local.properties
 *.jks
 *.keystore
 artifacts/*.apk
+/artifacts/avatars/
+/artifacts/icons/dafeiyu-abacus-v1.png
+/人物形象/

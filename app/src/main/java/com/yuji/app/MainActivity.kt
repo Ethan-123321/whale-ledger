@@ -33,11 +33,10 @@ class MainActivity : ComponentActivity() {
         setContent { MaterialTheme(colorScheme=lightColorScheme(primary=Color(0xFF28796C),background=Color(0xFFF6F7F3))) { App(viewModel()) } }
     }
 }
-val roles = linkedMapOf("大肥鱼" to "🐟", "Claude·大小姐" to "🍊", "小福子" to "👑", "糯米" to "🐱", "阿算盘" to "🧮", "自定义" to "✨")
 fun receipt(role: String, count: Int) = when(role) {
     "小福子" -> "启禀陛下，$count 笔开销已录入御账，请陛下过目。"
-    "糯米" -> "喵，主人！$count 笔账记好啦，摸摸我的小脑袋吧。"
-    "阿算盘" -> "$count 笔账单已保存，财务部今日正常营业。"
+    "糯米" -> "$count 笔都记好啦，喵！"
+    "阿算盘" -> "已保存 $count 笔账单。"
     else -> "咕噜……$count 笔账记好了，本鱼继续漂一会儿。"
 }
 @OptIn(ExperimentalMaterial3Api::class)
@@ -58,7 +57,37 @@ fun receipt(role: String, count: Int) = when(role) {
         removed = bill
         refresh()
     }
-    Scaffold(topBar={ TopAppBar(title={ Column { Text(if(tab==0) "${roles[role]} $role" else listOf("","我的账本","消费统计","角色与设置")[tab]); Text("大肥鱼记账 · 让每一笔都有回应",style=MaterialTheme.typography.labelSmall) } },actions={ TextButton(onClick={ adding=true }) { Text("＋ 记一笔") } }) },bottomBar={ NavigationBar { listOf("对话","账本","统计","设置").forEachIndexed { i,s -> NavigationBarItem(selected=tab==i,onClick={tab=i},icon={Text(listOf("◉","▤","◷","⚙")[i])},label={Text(s)}) } } }) { padding ->
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (tab == 0) RoleAvatar(role, Modifier.size(36.dp))
+                        Column {
+                            Text(if (tab == 0) role else listOf("", "我的账本", "消费统计", "角色与设置")[tab])
+                            Text("大肥鱼记账 · 让每一笔都有回应", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                },
+                actions = { TextButton(onClick = { adding = true }) { Text("＋ 记一笔") } }
+            )
+        },
+        bottomBar = {
+            NavigationBar {
+                listOf("对话", "账本", "统计", "设置").forEachIndexed { index, label ->
+                    NavigationBarItem(
+                        selected = tab == index,
+                        onClick = { tab = index },
+                        icon = { Text(listOf("◉", "▤", "◷", "⚙")[index]) },
+                        label = { Text(label) }
+                    )
+                }
+            }
+        }
+    ) { padding ->
         Column(Modifier.padding(padding).imePadding().fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             if(notice.isNotEmpty()) { TextButton(onClick={notice=""}) { Text(notice) } }
             removed?.let { b -> TextButton(onClick={ledger.save(listOf(b));refresh();removed=null;notice="已恢复账单"}) {Text("已撤销 ${b.title} · 点击恢复")} }
@@ -88,7 +117,7 @@ fun receipt(role: String, count: Int) = when(role) {
     var title by remember {mutableStateOf(b?.title ?: "")};var amount by remember {mutableStateOf(b?.let{money(it.cents)} ?: "")};var category by remember {mutableStateOf(b?.category ?: "未分类")};var date by remember {mutableStateOf(b?.date ?: LocalDate.now().toString())};var income by remember {mutableStateOf(b?.income ?: false)};var error by remember {mutableStateOf("")}
     var categoryMenu by remember {mutableStateOf(false)}
     var custom by remember {mutableStateOf(b!=null && b.category !in Categories.options(b.income) && customCategories.none { it.income == b.income && it.name == b.category } && b.category!="未分类")}
-    val options = Categories.options(income) + customCategories.filter { it.income == income }.map { it.name }
+    val options = (Categories.options(income) + customCategories.filter { it.income == income }.map { it.name }).distinct()
     AlertDialog(onDismissRequest=onDismiss,title={Text(if(b==null) "手动记一笔" else "编辑账单")},text={Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(title,{title=it},label={Text("用途 / 名称")});OutlinedTextField(amount,{amount=it},label={Text("金额（元）")})
         Row(verticalAlignment=Alignment.CenterVertically){Text(if(income) "收入" else "支出");Switch(income,{income=it;custom=false;category=if(it) "收入/其他" else "其他/待分类"})}
@@ -124,7 +153,25 @@ fun receipt(role: String, count: Int) = when(role) {
         item { TextButton(onClick = { manage("memory") }) { Text("记忆与偏好") } }
         item { TextButton(onClick = { manage("recurring") }) { Text("固定收入与支出 · 查看待确认") } }
         item {Text("选择记账搭子",style=MaterialTheme.typography.titleLarge)}
-        items(roles.entries.toList()) { e -> FilterChip(selected=role==e.key,onClick={onRole(e.key)},label={Text("${e.value} ${e.key}")}) }
+        items(roles.keys.toList(), key = { it }) { name ->
+            val selected = role == name
+            Column {
+                FilterChip(
+                    selected = selected,
+                    onClick = { onRole(name) },
+                    label = { Text(name) },
+                    leadingIcon = { RoleAvatar(name, Modifier.size(32.dp)) }
+                )
+                if (selected) {
+                    Text(
+                        roles.getValue(name).introduction,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
         item {OutlinedTextField(persona,{persona=it},label={Text("自定义人设")},modifier=Modifier.fillMaxWidth())}
         item {Text("自带 AI 接口",style=MaterialTheme.typography.titleLarge);Text("需要 AI 处理时，本条输入、近期或相关历史、未完成交易和部分偏好会发送到你配置的服务商。完整账本保存在本机。")}
         item {Text("1 · 选择服务商");Row {listOf("DeepSeek","自定义").forEach {p->FilterChip(selected=provider==p,enabled=!loading,onClick={provider=p;models=emptyList();model="";token="";status=""},label={Text(p)},modifier=Modifier.padding(end=8.dp))}}}
@@ -144,6 +191,6 @@ fun receipt(role: String, count: Int) = when(role) {
         item {Button(enabled=!loading,onClick={try {val base=address();val url=java.net.URL(base);require(url.protocol=="https"&&url.userInfo==null&&url.query==null&&url.ref==null){"请检查 HTTPS 地址"};require(model.isNotBlank()){ "请先选择模型" };val key=credential();require(key.isNotBlank()){ "请填写 API Key" };s.token=key;s.endpoint=base;s.model=model.trim();s.persona=persona;token="";notify("设置已保存：${s.model}")}catch(e:Exception){status=e.message ?: "保存失败"}}){Text("保存设置")}}
         item {TextButton(onClick={s.token="";notify("API 密钥已清除")}){Text("清除密钥")}}
         item {Row {TextButton(onClick={export.launch("yuji-backup.json")}){Text("导出账本")};TextButton(onClick={restore.launch(arrayOf("application/json"))}){Text("恢复账本")}}}
-        item {Text("大肥鱼记账 0.4.5 · 本地优先\n截图识别尚未开放。退款、转账和对话修改暂不自动执行，请通过账单编辑操作。")}
+        item {Text("大肥鱼记账 0.4.6 · 本地优先\n截图识别尚未开放。退款、转账和对话修改暂不自动执行，请通过账单编辑操作。")}
     }
 }

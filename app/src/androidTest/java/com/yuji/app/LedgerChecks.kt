@@ -46,8 +46,8 @@ class LedgerChecks : Instrumentation() {
             val amount = TransactionReader.read(source.text, day, null) as TransactionInput.Record
             val bill = amount.bills.single()
             fun reply() = ChatMessage(text = "已保存", role = "大肥鱼", user = false, date = today)
-            store.finish(source, listOf(bill), null, ::reply)
-            store.finish(source, listOf(bill.copy(id = "duplicate")), null, ::reply)
+            store.finish(source, listOf(bill), emptyList(), ::reply)
+            store.finish(source, listOf(bill.copy(id = "duplicate")), emptyList(), ::reply)
             check(ledger.list().size == 2 && bill.date == yesterday)
             check(store.links(listOf(source))[source.id] == listOf(bill.id))
             check(store.days().first().bills == 1)
@@ -66,12 +66,31 @@ class LedgerChecks : Instrumentation() {
             val draftMessage = ChatMessage(text = "买了耳机", role = "大肥鱼", user = true, date = yesterday, status = "sending")
             store.insert(draftMessage)
             val draft = TransactionDraft("耳机", false, day.minusDays(1))
-            store.finish(draftMessage, emptyList(), draft, ::reply)
+            store.finish(draftMessage, emptyList(), listOf(draft), ::reply)
             val complete = ChatMessage(text = "856元", role = "大肥鱼", user = true, date = today, status = "sending")
-            store.insert(complete)
-            val completed = TransactionReader.read(complete.text, day, store.draft()) as TransactionInput.Record
-            store.finish(complete, completed.bills, null, ::reply)
-            check(store.draft() == null && completed.bills.single().date == yesterday)
+            val pending = store.reviews(listOf(draftMessage)).getValue(draftMessage.id).single()
+            val completed = TransactionReader.read(complete.text, day, pending.draft) as TransactionInput.Record
+            val confirmed = completed.bills.single()
+            check(store.resolveReview(pending.id, complete, confirmed, null, reply()))
+            check(!store.resolveReview(pending.id, complete, confirmed.copy(id = "double-tap"), null, reply()))
+            check(store.review(pending.id) == null && confirmed.date == yesterday)
+            check(ledger.list().count { it.title == "耳机" } == 1)
+            val matching = confirmed.copy(id = "candidate")
+            val sentAt = requireNotNull(complete.sentAt)
+            check(store.recentDuplicates(listOf(matching), sentAt + 1000)[matching.id] == confirmed)
+            check(store.recentDuplicates(listOf(matching), sentAt + 301_000).isEmpty())
+            check(store.recentDuplicates(listOf(matching.copy(date = today)), sentAt + 1000).isEmpty())
+            val repeatedSource = ChatMessage(text = "昨天耳机856", role = "糯米", user = true, date = today, status = "sending")
+            store.insert(repeatedSource)
+            store.finish(repeatedSource, emptyList(), listOf(pending.draft.copy(
+                kind = ReviewKind.DUPLICATE, cents = confirmed.cents, duplicateId = confirmed.id)), ::reply)
+            val repeated = ChatStore(ledger).latestReviews().single()
+            check(repeated.role == "糯米" && repeated.draft.duplicateId == confirmed.id)
+            val unrelated = ChatMessage(text = "午饭15", role = "糯米", user = true, date = today, status = "sending")
+            store.insert(unrelated)
+            store.finish(unrelated, emptyList(), emptyList(), ::reply)
+            check(store.latestReviews().isEmpty() && store.review(repeated.id) != null)
+            check(store.resolveReview(repeated.id, ChatMessage(text = "保留原账单", role = "糯米", user = true), null, null, reply()))
             check(ledger.list().count { it.title == "耳机" } == 1)
 
             val purchases = listOf("乐事黄瓜味", "黄瓜味乐事薯片", "乐事黄瓜味", "乐事原味").map {
@@ -111,6 +130,15 @@ class LedgerChecks : Instrumentation() {
             check(runCatching { Ai.decode(response.replace("2026-11-16", "2026-02-30")) }.isFailure)
             check(runCatching { Ai.decode(response.replace("28", "28.123")) }.isFailure)
             check(runCatching { Ai.decode(response.replace("false", "\"false\"")) }.isFailure)
+            val uncategorized = bill.copy(category = Categories.fallback(false))
+            val pendingIncome = uncategorized.copy(income = true, category = Categories.fallback(true))
+            val candidates = listOf(uncategorized, pendingIncome, bill, uncategorized)
+            val suggestions = """{"0":"自定义午餐","1":"餐饮/甜点","2":"餐饮/饮料","99":"餐饮/甜点"}"""
+            val classified = Ai.applyCategories(suggestions, candidates,
+                Categories.expense + "自定义午餐", Categories.income)
+            check(classified == listOf(uncategorized.copy(category = "自定义午餐"), pendingIncome, bill, uncategorized))
+            check(Ai.decode(response.replace("午饭", "无糖可乐").replace("餐饮/正餐", "其他/待分类"))
+                .bills.single().category == "餐饮/饮料")
             val snapshot = ledger.list()
             val fixed=RecurringStore(ledger)
             val fixedBill=Bill(title="固定工资",cents=800000,income=true,category="收入/工资")
@@ -126,6 +154,20 @@ class LedgerChecks : Instrumentation() {
             check(Backup.decode(Backup.encode(snapshot)) == snapshot)
             val legacyBackup = Backup.encode(snapshot).replace("\"version\": 2", "\"version\": 1")
             check(Backup.decode(legacyBackup) == snapshot)
+            val reviewUpgrade = Ledger(targetContext, "$fixtureName-v4")
+            try {
+                SQLiteDatabase.openOrCreateDatabase(targetContext.getDatabasePath("$fixtureName-v4"), null).use { db ->
+                    db.chatSchema()
+                    db.execSQL("INSERT INTO messages VALUES('v4-source','昨天买了耳机','糯米',1,?,123,'done')", arrayOf(today))
+                    db.execSQL("INSERT INTO transaction_drafts VALUES(1,'耳机',0,?,'v4-source')", arrayOf(yesterday))
+                    db.version = 4
+                }
+                val migrated = ChatStore(reviewUpgrade).latestReviews().single()
+                check(migrated.role == "糯米" && migrated.draft == TransactionDraft("耳机", false, day.minusDays(1)))
+            } finally {
+                reviewUpgrade.close()
+                targetContext.deleteDatabase("$fixtureName-v4")
+            }
             report.putString("stream", "\nPASS: migration, history, links, retries, drafts, products, preferences, AI responses, backup\n")
             finish(Activity.RESULT_OK, report)
         } catch (failure: Throwable) {
