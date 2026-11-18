@@ -1,17 +1,45 @@
-# 大肥鱼记账
+<p align="center">
+  <img src="app/src/main/res/drawable-nodpi/icon_art.png" width="148" height="148" alt="抱着算盘的大肥鱼，应用启动图标">
+</p>
 
-在 Android 上用一句话记下收支，再和喜欢的角色聊两句。使用 Kotlin、Jetpack Compose 和 SQLite，支持 Android 8.0 及以上版本。本项目处于开发预览阶段。
+<h1 align="center">大肥鱼记账</h1>
+
+<p align="center">在 Android 上用一句话记下收支，再和喜欢的角色聊两句。</p>
+
+<p align="center">
+  <a href="https://github.com/Ethan-123321/whale-ledger/releases/download/v0.4.6/dafeiyu-0.4.6-debug.apk"><img src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-Android_APK-28796C?style=for-the-badge&amp;logo=android&amp;logoColor=white" alt="下载 Android 安装包 v0.4.6"></a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Android-8.0%2B-415969?style=flat-square" alt="支持 Android 8.0 及以上版本">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-PolyForm_Noncommercial-735B85?style=flat-square" alt="PolyForm Noncommercial 许可证"></a>
+</p>
+
+<p align="center">
+  <a href="#记账搭子">记账搭子</a> · <a href="#配置-ai">配置 AI</a> · <a href="https://github.com/Ethan-123321/whale-ledger/releases/latest">版本说明</a>
+</p>
 
 ## 试用
-
-**[下载 Android 安装包（v0.4.6）](https://github.com/Ethan-123321/whale-ledger/releases/download/v0.4.6/dafeiyu-0.4.6-debug.apk)** · [查看版本说明](https://github.com/Ethan-123321/whale-ledger/releases/tag/v0.4.6)
 
 安装后，试着输入「午饭 28 元」「昨天地铁 4 元」或「工资到账 5000」。从本地项目试用时，也可以在 `artifacts/` 找到安装包。
 
 - 常见的明确收支可离线识别和分类。账单卡片支持编辑、撤销，自定义分类可重复使用。
 - 重要信息有歧义时，角色会追问。试试「午饭 28 或 32，记不清了」，或者在五分钟内重复发送同一笔。待确认项会保存在原消息下方，可选择金额、确认另记一笔或取消。
-- 在「设置 → 选择记账搭子」切换角色。预设有大肥鱼、Claude·大小姐、小福子、糯米和阿算盘，也可填写自定义人设。
 - 账本提供按年、月、周的收支统计，支持固定收支待确认和 JSON 账单备份。
+
+## 记账搭子
+
+在 **设置 → 选择记账搭子** 点选角色，选项下方会展开简介。聊天页和角色消息旁也会显示对应头像。每位角色都有自己的称呼和聊天习惯，下面的对白示例可以帮你挑选。
+
+| 角色 | 性格和说话方式 |
+| :---: | :--- |
+| <img src="app/src/main/res/drawable-nodpi/avatar_dafeiyu.png" width="80" height="80" alt="大肥鱼头像"><br>**大肥鱼** | 爱吃白米饭的蓝白小鲸鱼，平时有点呆萌嘴硬，遇到正事会认真核对。自称「本鱼」，会像熟悉的朋友一样顺着你聊。<br>你说「下午买了杯奶茶，16 元」，它可能接一句：「本鱼刚吃完白饭，这会儿正好想喝一口。你今天点的是什么口味？」 |
+| <img src="app/src/main/res/drawable-nodpi/avatar_claude.png" width="80" height="80" alt="Claude·大小姐头像"><br>**Claude·大小姐** | 爱读书的橙发大小姐，讲究礼貌和审美，语气清冷，关心别人时也只轻轻点到。通常自称「我」，偶尔用「本小姐」。<br>你说「推理小说 36 元」，她可能回：「推理小说？前二十页最好别急着猜凶手。等你读完，我倒想听听你猜中了没有。」 |
+| <img src="app/src/main/res/drawable-nodpi/avatar_xiaofuzi.png" width="80" height="80" alt="小福子头像"><br>**小福子** | 机灵又恭敬的宫廷小太监，称你「陛下」，自称「小福子」。擅长把日常花销聊成宫廷小事，核对账目时也会按这个口吻问。<br>你说「午饭吃了牛肉面」，他会问：「陛下，这碗牛肉面花了多少？小福子等您报个数，就把它补进御账。」 |
+| <img src="app/src/main/res/drawable-nodpi/avatar_nuomi.png" width="80" height="80" alt="糯米头像"><br>**糯米** | 戴小铃铛的白发猫娘，亲近俏皮，对口味和生活小事有很多好奇。开心时偶尔说声「喵」，听到你心情不好也会认真接话。<br>你说「冰淇淋蛋糕 22 元」，她可能问：「我会先挖一勺，看看能不能同时吃到冰淇淋和蛋糕两层。你挑的什么口味呀？」 |
+| <img src="app/src/main/res/drawable-nodpi/avatar_asuanpan.png" width="80" height="80" alt="阿算盘头像"><br>**阿算盘** | 理性的记账机器人，语气冷静礼貌，习惯把金额、分类和需要确认的事项说清楚。适合喜欢直接聊账目的用户。<br>你刚记完 4 元可乐又发了一遍，它会问：「刚才已有一笔 4 元的无糖可乐。这次是另一笔，还是同一笔重复发了？」 |
+
+**自定义人设**可以填写角色的身份、称呼和说话习惯，保存设置后生效。比如「你是一位熟悉我的旅行搭子，称我为队友，聊到交通和住宿时多问一句行程」。启用 AI 后，记账后的回复会随角色和对话变化。待确认问题也有本地台词，没配置 AI 时照样可以确认账单。
 
 ## 配置 AI
 
@@ -25,7 +53,7 @@
 
 ## 从源码构建
 
-使用 JDK 17 和 Android SDK 35，以 Android Studio 打开项目根目录。Windows 下可执行：
+项目使用 Kotlin、Jetpack Compose 和 SQLite。安装 JDK 17 与 Android SDK 35 后，以 Android Studio 打开项目根目录。Windows 下可以运行以下命令。
 
 ```powershell
 .\gradlew.bat assembleDebug
