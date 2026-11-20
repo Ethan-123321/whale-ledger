@@ -27,6 +27,12 @@ class TransactionReaderTest {
         assertFalse(read("华为FreeClip2") is TransactionInput.Record)
     }
 
+    @Test fun ordinaryQuestionsCanChatWithoutOpeningAnAccountingPath() {
+        assertTrue((read("健身之后该休息吗？") as TransactionInput.Respond).conversation)
+        assertTrue((read("如果明天练腿，今天应该休息吗？") as TransactionInput.Respond).conversation)
+        assertEquals(TransactionInput.AskAi, read("加了份酱鸭，七块"))
+    }
+
     @Test fun distinctDaysAndMultipleAmounts() {
         val bills = recorded("昨天午饭28，今天地铁4元")
         assertEquals(listOf(2800L, 400L), bills.map { it.cents })

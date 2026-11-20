@@ -133,8 +133,19 @@ class LedgerChecks : Instrumentation() {
             check(store.page(today, 5, 0).isEmpty() && ledger.list().any { it.title == "耳机" })
 
             val response = """{"bills":[{"title":"午饭","amount":"28","income":false,"category":"餐饮/正餐","date":"2026-11-16"}],"reply":"收到"}"""
-            check(TransactionEvidence.validate("午饭28", Ai.decode(response).bills).single().cents == 2800L)
-            check(runCatching { TransactionEvidence.validate("聊天", Ai.decode(response).bills) }.isFailure)
+            check(TransactionEvidence.verify("午饭28", Ai.decode(response)).bills.single().cents == 2800L)
+            check(runCatching { TransactionEvidence.verify("聊天", Ai.decode(response)) }.isFailure)
+            check(!Ai.decode(response.replace("\"reply\"", "\"conversation\":true,\"reply\"")).conversation)
+            val casual = Ai.decode("""{"bills":[],"reply":"尾巴给你拍两下。","conversation":true}""")
+            check(casual.conversation && casual.drafts.isEmpty())
+            val chatSource = ChatMessage(text = "主要是力量，有氧太累了。", role = "大肥鱼", user = true)
+            val prompt = Ai.replyMessages(AiConfig("", "", "", "大肥鱼", ""), chatSource, emptyList(),
+                listOf(chatSource), "", null, leaveSpace = true)
+            val chatFacts = Ai.jsonObject(prompt.getJSONObject(1).getString("content"))
+            check(chatFacts.getString("current_input") == chatSource.text)
+            check(chatFacts.getJSONArray("recent_or_related").length() == 0)
+            check(chatFacts.getString("app_reply_direction").contains("省去附带的追问"))
+            check(prompt.getJSONObject(0).getString("content").contains("角色：尾巴给你拍两下。"))
             check(runCatching { Ai.decode(response.replace("2026-11-16", "2026-02-30")) }.isFailure)
             check(runCatching { Ai.decode(response.replace("28", "28.123")) }.isFailure)
             check(runCatching { Ai.decode(response.replace("false", "\"false\"")) }.isFailure)

@@ -7,7 +7,7 @@
 <p align="center">在 Android 上用一句话记下收支，再和喜欢的角色聊两句。</p>
 
 <p align="center">
-  <a href="https://github.com/Ethan-123321/whale-ledger/releases/download/v0.4.7/dafeiyu-0.4.7-debug.apk"><img src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-Android_APK-28796C?style=for-the-badge&amp;logo=android&amp;logoColor=white" alt="下载 Android 安装包 v0.4.7"></a>
+  <a href="https://github.com/Ethan-123321/whale-ledger/releases/download/v0.4.8/dafeiyu-0.4.8-debug.apk"><img src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-Android_APK-28796C?style=for-the-badge&amp;logo=android&amp;logoColor=white" alt="下载 Android 安装包 v0.4.8"></a>
 </p>
 
 <p align="center">
@@ -39,7 +39,7 @@
 | <img src="app/src/main/res/drawable-nodpi/avatar_nuomi.png" width="80" height="80" alt="糯米头像"><br>**糯米** | 戴小铃铛的白发猫娘，亲近俏皮，对口味和生活小事有很多好奇。开心时偶尔说声「喵」，听到你心情不好也会认真接话。<br>你说「冰淇淋蛋糕 22 元」，她可能问：「我会先挖一勺，看看能不能同时吃到冰淇淋和蛋糕两层。你挑的什么口味呀？」 |
 | <img src="app/src/main/res/drawable-nodpi/avatar_asuanpan.png" width="80" height="80" alt="阿算盘头像"><br>**阿算盘** | 理性的记账机器人，语气冷静礼貌，习惯把金额、分类和需要确认的事项说清楚。适合喜欢直接聊账目的用户。<br>你刚记完 4 元可乐又发了一遍，它会问：「刚才已有一笔 4 元的无糖可乐。这次是另一笔，还是同一笔重复发了？」 |
 
-**自定义人设**可以填写角色的身份、称呼和说话习惯，保存设置后生效。比如「你是一位熟悉我的旅行搭子，称我为队友，聊到交通和住宿时多问一句行程」。启用 AI 后，记账后的回复会随角色和对话变化。待确认问题也有本地台词，没配置 AI 时照样可以确认账单。
+**自定义人设**可以填写角色的身份、称呼和说话习惯，保存设置后生效。比如「你是一位熟悉我的旅行搭子，称我为队友，聊到交通和住宿时喜欢分享旅行里的小发现」。启用 AI 后，搭子会跟着话题调整回复。有时接一句就停，有时按角色自己的想法多聊一点。待确认账单有本地台词，没配置 AI 时照样可以处理。
 
 ## 配置 AI
 

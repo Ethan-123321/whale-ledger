@@ -125,9 +125,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 val result = try {
                     when (val local = prepared.input) {
-                        is TransactionInput.Record -> AiResult(local.bills, "")
-                        is TransactionInput.Respond -> AiResult(emptyList(), local.reply)
-                        is TransactionInput.Clarify -> AiResult(emptyList(), local.draft.title + " 的金额是多少元？", local.draft)
+                        is TransactionInput.Record -> AiResult(local.bills, "", local.drafts)
+                        is TransactionInput.Respond -> {
+                            val wording = if (local.conversation) optionalAi { characterReply(source) } else null
+                            AiResult(emptyList(), wording ?: local.reply)
+                        }
+                        is TransactionInput.Clarify -> AiResult(emptyList(), "", listOf(local.draft))
                         TransactionInput.AskAi -> {
                             val config = settings.config()
                             withContext(Dispatchers.IO) {
@@ -137,8 +140,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                     null, prepared.expense, prepared.income, memory)
                                 val date = LocalDate.parse(requireNotNull(source.date))
                                 require(parsed.bills.none { LocalDate.parse(it.date).isAfter(date) } &&
-                                    parsed.draft?.date?.isAfter(date) != true) { "模型返回了未来日期，请核对交易时间。" }
-                                parsed.copy(bills = TransactionEvidence.validate(source.text, parsed.bills))
+                                    parsed.drafts.none { it.date.isAfter(date) }) { "模型返回了未来日期，请核对交易时间。" }
+                                TransactionEvidence.verify(source.text, parsed)
                             }
                         }
                     }
@@ -171,9 +174,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             Regex("又买了|另买了|再记一笔").containsMatchIn(source.text)
                         val duplicates = if (explicitRepeat) emptyMap() else store.recentDuplicates(candidates, source.sentAt)
                         val bills = candidates.filterNot { it.id in duplicates }
-                        val drafts = listOfNotNull(result.draft) +
-                            (prepared.input as? TransactionInput.Record)?.drafts.orEmpty() +
-                            candidates.mapNotNull { bill ->
+                        val drafts = result.drafts + candidates.mapNotNull { bill ->
                                 duplicates[bill.id]?.let { original -> duplicateDraft(bill, original) }
                             }
                         store.finish(source, bills, drafts) {
@@ -212,8 +213,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             store.updateReply(reply.id, prefix + wording)
                         }
                     }
-                } else if (reply != null && savedBills.isNotEmpty() && !hasPending) {
-                    respondToSaved(source, reply, savedBills, repeatFact)
+                } else if (reply != null && !hasPending && (savedBills.isNotEmpty() || result.conversation)) {
+                    respondInCharacter(source, reply, savedBills, repeatFact, prepared.input is TransactionInput.Record)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -276,32 +277,40 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             else null to null
         }
         refresh()
-        if (reply != null && saved != null) respondToSaved(confirmation, reply, listOf(saved), null)
+        if (reply != null && saved != null) respondInCharacter(confirmation, reply, listOf(saved), null, simpleEntry = true)
     }
 
     private fun duplicateDraft(bill: Bill, original: Bill) =
         TransactionDraft(bill.title, bill.income, LocalDate.parse(bill.date), ReviewKind.DUPLICATE, bill.cents,
             duplicateId = original.id, category = bill.category)
 
-    private suspend fun respondToSaved(source: ChatMessage, reply: ChatMessage, bills: List<Bill>, repeat: String?) =
+    private suspend fun respondInCharacter(
+        source: ChatMessage, reply: ChatMessage, bills: List<Bill>, repeat: String?, simpleEntry: Boolean
+    ) =
         optionalAi {
-            val config = settings.config().copy(role = source.role)
-            if (config.endpoint.isNotBlank() && config.model.isNotBlank() && config.token.isNotBlank()) {
-                val history = store.context(source).filter { it.id != reply.id }
-                val memory = products.preferences().take(10).joinToString("\n") { it.text }
-                store.updateReply(reply.id, Ai.respond(config, source, bills, history, memory, repeat))
-            }
+            val text = characterReply(source, bills, repeat, simpleEntry, reply.id)
+            if (text != null) store.updateReply(reply.id, text)
         }
 
-    private suspend fun optionalAi(block: () -> Unit) {
+    private fun characterReply(
+        source: ChatMessage, bills: List<Bill> = emptyList(), repeat: String? = null,
+        simpleEntry: Boolean = false, excludedReplyId: String? = null
+    ): String? {
+        val config = settings.config().copy(role = source.role)
+        if (config.endpoint.isBlank() || config.model.isBlank() || config.token.isBlank()) return null
+        val history = store.context(source).filter { it.id != excludedReplyId && (!it.user || explicitPreference(it.text) == null) }
+        val memory = products.preferences().take(10).joinToString("\n") { it.text }
+        return Ai.respond(config, source, bills, history, memory, repeat, simpleEntry)
+    }
+
+    private suspend fun <T> optionalAi(block: () -> T): T? =
         try {
             withContext(Dispatchers.IO) { block() }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
-            // The saved reply remains available when the model request fails.
+            null
         }
-    }
 
     private suspend fun fail(source: ChatMessage, message: String) = withContext(Dispatchers.IO) {
         ledger.writableDatabase.atomic {
@@ -325,15 +334,4 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private data class Prepared(val input: TransactionInput,
         val expense: Set<String>, val income: Set<String>, val preference: String?)
-}
-
-object TransactionEvidence {
-    private val amount = Regex("(?<![A-Za-z0-9.\\-])\\d+(?:\\.\\d+)?(?![A-Za-z0-9.])")
-    fun validate(input: String, bills: List<Bill>): List<Bill> {
-        val current = java.text.Normalizer.normalize(input, java.text.Normalizer.Form.NFKC)
-            .replace(Regex("\\d{4}-\\d{2}-\\d{2}"), "")
-        val amounts = amount.findAll(current).mapNotNull { runCatching { parseCents(it.value) }.getOrNull() }.toMutableList()
-        require(bills.all { amounts.remove(it.cents) }) { "模型返回的金额缺少本条消息中的依据，请核对或手动添加。" }
-        return bills
-    }
 }

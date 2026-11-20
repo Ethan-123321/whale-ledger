@@ -17,12 +17,12 @@ data class TransactionDraft(
 sealed interface TransactionInput {
     data class Record(val bills: List<Bill>, val drafts: List<TransactionDraft> = emptyList()) : TransactionInput
     data class Clarify(val draft: TransactionDraft) : TransactionInput
-    data class Respond(val reply: String) : TransactionInput
+    data class Respond(val reply: String, val conversation: Boolean = false) : TransactionInput
     data object AskAi : TransactionInput
 }
 
 object TransactionReader {
-    private val blocked = Regex("可能买|可能花|考虑买|想买|想花|准备买|计划|打算|报价|多少钱|要不要|没买|没花|未买|没有买|没有花|不买|如果|假如|退款|转账|删除|撤销|修改|改成|预算|合计|总共|一共|余额|统计|多少[块笔次]|[?？]")
+    private val blocked = Regex("可能买|可能花|考虑买|想买|想花|准备买|计划|打算|报价|多少钱|要不要|没买|没花|未买|没有买|没有花|不买|如果|假如|退款|转账|删除|撤销|修改|改成|预算|合计|总共|一共|余额|统计|多少[块笔次]")
     private val cancel = Regex("^(取消(记账|这笔)?|不用记了?|别记了?|算了|不记了)$")
     private val confirmation = Regex("^(已经买了|买了|是的|是|对|确认)$")
     private val amountOnly = Regex("^(\\d+(?:\\.\\d+)?)[ ]*(?:元|块钱?|人民币)?$")
@@ -44,7 +44,9 @@ object TransactionReader {
     fun read(input: String, today: LocalDate, pending: TransactionDraft?, expense: Set<String> = emptySet(), income: Set<String> = emptySet()): TransactionInput {
         val text = Normalizer.normalize(input, Normalizer.Form.NFKC).trim().trimEnd('。', '！', '!', '，', ',')
         if (cancel.matches(text)) return TransactionInput.Respond("已结束待补充的记账。")
-        if (blocked.containsMatchIn(text)) return TransactionInput.Respond("这条消息没有新增账单。")
+        if (blocked.containsMatchIn(text) || text.any { it == '?' || it == '？' }) {
+            return TransactionInput.Respond("这条消息没有新增账单。", conversation = true)
+        }
         if (invalidAmount.containsMatchIn(text.replace(Regex("\\d{4}-\\d{2}-\\d{2}"), ""))) {
             return TransactionInput.Respond("请核对金额，使用大于零且最多两位小数的数字。")
         }
