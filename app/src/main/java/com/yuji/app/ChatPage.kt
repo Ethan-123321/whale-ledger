@@ -16,7 +16,7 @@ import java.time.LocalDate
 
 @Composable
 fun ChatPage(
-    model: ChatViewModel, bills: List<Bill>, add: () -> Unit, edit: (Bill) -> Unit, revoke: (Bill) -> Unit
+    model: ChatViewModel, bills: List<Bill>, add: () -> Unit, image: () -> Unit, edit: (Bill) -> Unit, revoke: (Bill) -> Unit
 ) {
     var today by remember { mutableStateOf(LocalDate.now().toString()) }
     LaunchedEffect(Unit) {
@@ -118,7 +118,7 @@ fun ChatPage(
             }
         } else {
             Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = add) { Text("＋") }
+                AddBillMenu("＋", add, image)
                 OutlinedTextField(input, { input = it.take(2000) }, placeholder = { Text("说说这笔收支…") },
                     modifier = Modifier.weight(1f), maxLines = 3)
                 TextButton(enabled = !model.busy && input.isNotBlank(), onClick = {

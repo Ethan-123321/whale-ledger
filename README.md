@@ -7,7 +7,7 @@
 <p align="center">在 Android 上用一句话记下收支，再和喜欢的角色聊两句。</p>
 
 <p align="center">
-  <a href="https://github.com/Ethan-123321/whale-ledger/releases/download/v0.4.6/dafeiyu-0.4.6-debug.apk"><img src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-Android_APK-28796C?style=for-the-badge&amp;logo=android&amp;logoColor=white" alt="下载 Android 安装包 v0.4.6"></a>
+  <a href="https://github.com/Ethan-123321/whale-ledger/releases/download/v0.4.7/dafeiyu-0.4.7-debug.apk"><img src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-Android_APK-28796C?style=for-the-badge&amp;logo=android&amp;logoColor=white" alt="下载 Android 安装包 v0.4.7"></a>
 </p>
 
 <p align="center">
@@ -64,10 +64,19 @@ Gradle 生成的 APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。测试
 
 ## 当前范围
 
-本版提供文字记账和手动编辑。截图识别、云同步、退款与转账的专用流程暂未提供。模型生成的回复和分类会随服务商与模型变化，账单可在 App 内核对。
+Android 0.4.7 起，可以在「＋ → 从图片记账」选择支付截图或小票。识别结果会预填到可编辑账单，点击保存才会入账。方向、日期或金额有疑问时可手工填写。
+
+在「设置 → 图片账单识别」选择识别方式并保存。
+
+- **本地 OCR**是默认选项。图片在设备上离线处理。
+- **多模态模型**默认使用已保存的对话模型，复用它的接口和 API Key。也可以选「独立识图模型」，单独填写 HTTPS 基础地址、模型 ID 和 API Key。接口须支持 OpenAI 兼容的 Chat Completions 图片输入。应用会向选定服务商发送压缩后的账单图片。
+
+云同步、退款与转账的专用流程暂未提供。模型生成的回复和分类会随服务商与模型变化，账单可在 App 内核对。
 
 ## 许可证与素材
 
 项目源码采用 [PolyForm Noncommercial 1.0.0](LICENSE)。可按许可条款用于非商业用途、修改和分发。商业使用需另行获取授权。第三方依赖沿用各自的许可证。
+
+离线识图使用 [Tesseract4Android](https://github.com/adaptech-cz/Tesseract4Android)，随包提供 [tessdata_fast 4.1.0](https://github.com/tesseract-ocr/tessdata_fast/tree/4.1.0) 的简体中文和英文模型。[语言模型 Apache-2.0 许可](app/src/main/assets/tessdata/LICENSE)
 
 内置头像和启动图标为本项目通过图像生成制作的成品。部分人设采用社区二创风格，大肥鱼和 Claude·大小姐均为非官方角色。应用实际使用的模型取决于用户配置。角色参考原图留在本地。

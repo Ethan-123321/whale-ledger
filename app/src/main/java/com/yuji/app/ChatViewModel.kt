@@ -1,6 +1,7 @@
 package com.yuji.app
 
 import android.app.Application
+import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -10,6 +11,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.net.SocketTimeoutException
 import java.time.LocalDate
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
@@ -24,9 +26,59 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var reviewError by mutableStateOf("")
         private set
+    var receiptReading by mutableStateOf<ReceiptMode?>(null)
+        private set
+    var receiptDraft by mutableStateOf<ReceiptFields?>(null)
+        private set
     val migrationIssue = runCatching { store.migrate(settings.history) }.exceptionOrNull() != null
 
     fun refresh() { revision++ }
+
+    fun scanReceipt(uri: Uri) {
+        if (receiptReading != null || receiptDraft != null) return
+        val mode = settings.receiptMode
+        receiptReading = mode
+        viewModelScope.launch {
+            try {
+                val context = getApplication<Application>()
+                receiptDraft = when (mode) {
+                    ReceiptMode.LOCAL_OCR -> ReceiptOcr.read(context, uri)
+                    ReceiptMode.CHAT_MODEL, ReceiptMode.CUSTOM_MODEL -> {
+                        val config = withContext(Dispatchers.IO) { runCatching { settings.receiptConfig(mode) }.getOrNull() }
+                        val source = if (mode == ReceiptMode.CHAT_MODEL) "对话 AI" else "多模态识图"
+                        if (config == null) ReceiptFields(warning = "请到设置检查${source}的 API 地址、模型和密钥。")
+                        else ReceiptVision.read(context, uri, config)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Ai.RequestFailed) {
+                val message = when (e.status) {
+                    400, 415, 422 -> "服务商拒绝了识图请求，请检查接口和模型是否支持图片输入。"
+                    401, 403 -> "识图接口鉴权失败，请检查 API Key 和模型权限。"
+                    404 -> "找不到识图接口或模型，请检查基础地址和模型 ID。"
+                    413 -> "图片超过服务商的大小限制，请裁剪后重试。"
+                    429 -> "识图请求过多，请稍后重试。"
+                    else -> "识图服务请求失败（HTTP ${e.status}）。"
+                }
+                receiptDraft = ReceiptFields(warning = "$message 可以手动填写账单。")
+            } catch (_: SocketTimeoutException) {
+                receiptDraft = ReceiptFields(warning = "识图请求超时，可以重试或手动填写。")
+            } catch (_: Exception) {
+                val warning = if (mode == ReceiptMode.LOCAL_OCR) "这张图片无法读取或识别，可以手动填写账单。"
+                    else "多模态识图失败，请检查图片、网络和接口设置，或手动填写。"
+                receiptDraft = ReceiptFields(warning = warning)
+            } catch (_: LinkageError) {
+                receiptDraft = ReceiptFields(warning = "这台设备暂时无法运行文字识别，可以手动填写账单。")
+            } finally {
+                receiptReading = null
+            }
+        }
+    }
+
+    fun dismissReceipt() {
+        receiptDraft = null
+    }
 
     fun send(text: String, retry: ChatMessage? = null) {
         if (busy || text.isBlank() || retry != null && !store.canRetry(retry.id)) return

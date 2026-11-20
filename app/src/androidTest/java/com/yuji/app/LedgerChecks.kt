@@ -2,11 +2,19 @@ package com.yuji.app
 
 import android.app.Activity
 import android.app.Instrumentation
+import android.content.ContextWrapper
 import android.os.Bundle
 import android.database.sqlite.SQLiteDatabase
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.net.Uri
+import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
 import java.time.LocalDate
+import kotlinx.coroutines.runBlocking
 
 class LedgerChecks : Instrumentation() {
     override fun onCreate(arguments: Bundle?) {
@@ -168,7 +176,9 @@ class LedgerChecks : Instrumentation() {
                 reviewUpgrade.close()
                 targetContext.deleteDatabase("$fixtureName-v4")
             }
-            report.putString("stream", "\nPASS: migration, history, links, retries, drafts, products, preferences, AI responses, backup\n")
+            checkReceiptVision()
+            checkImageReceipt()
+            report.putString("stream", "\nPASS: migration, history, links, retries, drafts, products, preferences, AI responses, backup, local image OCR, vision receipt settings and decoding\n")
             finish(Activity.RESULT_OK, report)
         } catch (failure: Throwable) {
             val trace = StringWriter()
@@ -178,6 +188,84 @@ class LedgerChecks : Instrumentation() {
         } finally {
             ledger.close()
             targetContext.deleteDatabase(fixtureName)
+        }
+    }
+
+    private fun checkImageReceipt() {
+        val file = File.createTempFile("synthetic-receipt-", ".png", targetContext.cacheDir)
+        val bitmap = Bitmap.createBitmap(1000, 600, Bitmap.Config.ARGB_8888)
+        try {
+            val canvas = Canvas(bitmap)
+            canvas.drawColor(Color.WHITE)
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.BLACK
+                textSize = 52f
+            }
+            listOf("支付成功", "商户名称：便利店", "实付金额：¥28.50", "支付时间：2026-11-18")
+                .forEachIndexed { i, line -> canvas.drawText(line, 70f, 120f + i * 100f, paint) }
+            file.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+            val receipt = runBlocking { ReceiptOcr.read(targetContext, Uri.fromFile(file)) }
+            check(receipt.cents == 2850L) {
+                "OCR didn't extract the receipt amount: $receipt; synthetic input OCR: ${ReceiptOcr.recognize(targetContext, bitmap)}"
+            }
+            check(receipt.date == LocalDate.of(2026, 11, 18)) { "OCR didn't extract the receipt date: $receipt" }
+            check(receipt.income == false) { "OCR didn't extract expense direction: $receipt" }
+        } finally {
+            bitmap.recycle()
+            file.delete()
+        }
+    }
+
+    private fun checkReceiptVision() {
+        val dataUrl = "data:image/jpeg;base64,dGVzdA=="
+        val userMessage = ReceiptVision.messages(dataUrl).getJSONObject(1)
+        val image = userMessage.getJSONArray("content").getJSONObject(1)
+        check(userMessage.getString("role") == "user")
+        check(image.getString("type") == "image_url" && image.getJSONObject("image_url").getString("url") == dataUrl)
+
+        val today = LocalDate.of(2026, 11, 19)
+        val completed = ReceiptVision.decode(
+            """{"status":"completed","title":"便利店","amount":"28.50","income":false,"date":"2026-11-18"}""", today
+        )
+        check(completed == ReceiptFields("便利店", 2850, false, today.minusDays(1)))
+        val partial = ReceiptVision.decode(
+            """{"status":"completed","title":"便利店","amount":"28.555","income":"false","date":"2026-11-20"}""", today
+        )
+        check(partial.title == "便利店" && partial.cents == null && partial.income == null &&
+            partial.date == null && partial.warning != null)
+        val unsupported = ReceiptVision.decode(
+            """{"status":"unsupported","title":"转账","amount":"28.50","income":true,"date":"2026-11-18"}""", today
+        )
+        check(unsupported.cents == null && unsupported.income == null && unsupported.warning != null)
+        check(runCatching { ReceiptVision.decode("""{"amount":"28.50"}""", today) }.isFailure)
+
+        val fixtureName = "receipt-test-" + java.util.UUID.randomUUID()
+        val isolated = object : ContextWrapper(targetContext) {
+            override fun getSharedPreferences(name: String, mode: Int) =
+                super.getSharedPreferences(fixtureName, mode)
+        }
+        try {
+            val settings = Settings(isolated)
+            check(settings.receiptMode == ReceiptMode.LOCAL_OCR)
+            check(runCatching { settings.useChatReceiptVision() }.isFailure)
+            settings.endpoint = "https://chat.example/v1"
+            settings.model = "chat-with-images"
+            settings.token = "fixture-chat-key"
+            settings.useChatReceiptVision()
+            check(Settings(isolated).receiptMode == ReceiptMode.CHAT_MODEL)
+            val chat = settings.receiptConfig(ReceiptMode.CHAT_MODEL)
+            check(chat.endpoint == settings.endpoint && chat.model == settings.model && chat.token == settings.token)
+            settings.model = "updated-chat-model"
+            check(settings.receiptConfig(ReceiptMode.CHAT_MODEL).model == settings.model)
+            settings.useReceiptVision("https://vision.example/v1", "vision", "fixture-vision-key")
+            val vision = settings.receiptConfig(ReceiptMode.CUSTOM_MODEL)
+            check(vision.endpoint == "https://vision.example/v1" && vision.model == "vision" && vision.token == "fixture-vision-key")
+            check(runCatching { settings.useReceiptVision("https://other.example/v1", "vision", "") }.isFailure)
+            settings.clearReceiptKey()
+            check(settings.receiptMode == ReceiptMode.LOCAL_OCR && !settings.hasReceiptKey)
+            check(settings.token == "fixture-chat-key")
+        } finally {
+            targetContext.deleteSharedPreferences(fixtureName)
         }
     }
 }

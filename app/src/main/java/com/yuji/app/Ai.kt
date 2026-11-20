@@ -28,20 +28,82 @@ class Settings(context: Context) {
     var model: String get() = p.getString("model", "")!!; set(v) { p.edit().putString("model",v).apply() }
     var role: String get() = p.getString("role", "大肥鱼")!!; set(v) { p.edit().putString("role",v).apply() }
     var persona: String get() = p.getString("persona", "")!!; set(v) { p.edit().putString("persona",v).apply() }
+    val receiptMode: ReceiptMode
+        get() = when (p.getString("receipt_mode", null)) {
+            ReceiptMode.CHAT_MODEL.name -> ReceiptMode.CHAT_MODEL
+            ReceiptMode.CUSTOM_MODEL.name -> ReceiptMode.CUSTOM_MODEL
+            else -> ReceiptMode.LOCAL_OCR
+        }
+    val receiptEndpoint: String get() = p.getString("receipt_endpoint", "").orEmpty()
+    val receiptModel: String get() = p.getString("receipt_model", "").orEmpty()
+    val hasReceiptKey: Boolean get() = p.contains("receipt_token")
+
+    fun useLocalReceiptOcr() {
+        p.edit().putString("receipt_mode", ReceiptMode.LOCAL_OCR.name).apply()
+    }
+
+    fun clearReceiptKey() {
+        val edit = p.edit().remove("receipt_token")
+        if (receiptMode == ReceiptMode.CUSTOM_MODEL) {
+            edit.putString("receipt_mode", ReceiptMode.LOCAL_OCR.name)
+        }
+        edit.apply()
+    }
+
+    fun useChatReceiptVision() {
+        require(endpoint.isNotBlank() && model.isNotBlank() && p.contains("token")) { "请先保存下方的对话 AI 接口、模型和密钥" }
+        Ai.completionUrl(endpoint)
+        p.edit().putString("receipt_mode", ReceiptMode.CHAT_MODEL.name).apply()
+    }
+
+    fun useReceiptVision(endpoint: String, model: String, token: String) {
+        val base = endpoint.trim().trimEnd('/')
+        Ai.completionUrl(base)
+        require(model.isNotBlank()) { "请填写支持图片输入的模型 ID" }
+        val savedToken = if (token.isNotBlank()) encryptToken(token.trim()) else {
+            val retained = requireNotNull(p.getString("receipt_token", null)) { "请填写识图 API Key" }
+            require(base == receiptEndpoint) { "更换地址后，请填写对应的 API Key" }
+            retained
+        }
+        p.edit().putString("receipt_endpoint", base)
+            .putString("receipt_model", model.trim())
+            .putString("receipt_token", savedToken)
+            .putString("receipt_mode", ReceiptMode.CUSTOM_MODEL.name)
+            .apply()
+    }
+
+    internal fun receiptConfig(mode: ReceiptMode): ReceiptVisionConfig {
+        val prefix = if (mode == ReceiptMode.CHAT_MODEL) "" else "receipt_"
+        val entry = p.all
+        val endpoint = entry[prefix + "endpoint"] as? String
+        val model = entry[prefix + "model"] as? String
+        val storedToken = entry[prefix + "token"] as? String
+        require(!endpoint.isNullOrBlank() && !model.isNullOrBlank() && !storedToken.isNullOrBlank())
+        return ReceiptVisionConfig(endpoint, model, decryptToken(storedToken))
+    }
+
     private fun key(): SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         return (ks.getKey("yuji_api",null) as? SecretKey) ?: KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES,"AndroidKeyStore").apply { init(KeyGenParameterSpec.Builder("yuji_api",KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT).setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build()) }.generateKey()
     }
-    var token: String
-        get() {
-            val raw = p.getString("token",null) ?: return ""
-            val bytes = Base64.decode(raw,Base64.NO_WRAP)
-            return Cipher.getInstance("AES/GCM/NoPadding").run { init(Cipher.DECRYPT_MODE,key(),GCMParameterSpec(128,bytes.copyOfRange(0,12))); String(doFinal(bytes.copyOfRange(12,bytes.size)),Charsets.UTF_8) }
+    private fun decryptToken(raw: String): String {
+        val bytes = Base64.decode(raw, Base64.NO_WRAP)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+            init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
         }
+        return String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8)
+    }
+
+    private fun encryptToken(token: String): String {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
+        return Base64.encodeToString(cipher.iv + cipher.doFinal(token.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
+    }
+
+    var token: String
+        get() = p.getString("token", null)?.let(::decryptToken).orEmpty()
         set(v) {
             if(v.isBlank()) { p.edit().remove("token").apply(); return }
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE,key()) }
-            p.edit().putString("token",Base64.encodeToString(cipher.iv+cipher.doFinal(v.toByteArray(Charsets.UTF_8)),Base64.NO_WRAP)).apply()
+            p.edit().putString("token", encryptToken(v)).apply()
         }
 }
 data class AiResult(val bills: List<Bill>, val reply: String, val draft: TransactionDraft? = null)
@@ -184,10 +246,29 @@ object Ai {
         return decode(completion(s, turns, 0.1, timeout = 45000), expense, income)
     }
 
-    private fun completion(s: AiConfig, turns: JSONArray, temperature: Double, timeout: Int): String {
-        val url = URL(s.endpoint.trimEnd('/') + "/chat/completions")
-        require(url.protocol == "https" && url.userInfo == null && url.query == null && url.ref == null) { "API 地址必须使用 HTTPS" }
-        val body = JSONObject().put("model", s.model).put("messages", turns).put("temperature", temperature)
+    private fun completion(s: AiConfig, turns: JSONArray, temperature: Double, timeout: Int): String =
+        completion(s.endpoint, s.model, s.token, turns, timeout, temperature)
+
+    internal fun completionUrl(endpoint: String): URL {
+        val url = runCatching { URL(endpoint.trimEnd('/') + "/chat/completions").toURI().toURL() }.getOrNull()
+        require(url != null && url.protocol == "https" && url.host.isNotBlank() &&
+            url.userInfo == null && url.query == null && url.ref == null) { "请输入有效的 HTTPS 基础地址" }
+        return url
+    }
+
+    internal class RequestFailed(val status: Int) : IllegalArgumentException("AI 请求失败（HTTP ${status}），未新增账单。")
+
+    internal fun completion(
+        endpoint: String,
+        model: String,
+        token: String,
+        turns: JSONArray,
+        timeout: Int,
+        temperature: Double? = null
+    ): String {
+        val url = completionUrl(endpoint)
+        val body = JSONObject().put("model", model).put("messages", turns)
+        if (temperature != null) body.put("temperature", temperature)
         val c = url.openConnection() as HttpsURLConnection
         try {
             c.requestMethod = "POST"
@@ -196,17 +277,17 @@ object Ai {
             c.instanceFollowRedirects = false
             c.doOutput = true
             c.setRequestProperty("Content-Type", "application/json")
-            c.setRequestProperty("Authorization", "Bearer ${s.token}")
+            c.setRequestProperty("Authorization", "Bearer $token")
             c.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val status = c.responseCode
-            require(status in 200..299) { "AI 请求失败（HTTP ${status}），未新增账单。" }
+            if (status !in 200..299) throw RequestFailed(status)
             val response = c.inputStream.bufferedReader().use { it.readText() }
             return JSONObject(response).getJSONArray("choices").getJSONObject(0)
                 .getJSONObject("message").getString("content")
         } finally { c.disconnect() }
     }
 
-    private fun jsonObject(content: String) =
+    internal fun jsonObject(content: String) =
         JSONObject(content.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim())
 
     fun decode(content: String, expense: Set<String> = emptySet(), income: Set<String> = emptySet()): AiResult {
