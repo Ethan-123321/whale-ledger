@@ -2,7 +2,7 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id(
 android {
     namespace = "com.yuji.app"
     compileSdk = 35
-    defaultConfig { applicationId = "com.yuji.app"; minSdk = 26; targetSdk = 35; versionCode = 12; versionName = "0.4.8"; testInstrumentationRunner = "com.yuji.app.LedgerChecks" }
+    defaultConfig { applicationId = "com.yuji.app"; minSdk = 26; targetSdk = 35; versionCode = 13; versionName = "0.4.9"; testInstrumentationRunner = "com.yuji.app.LedgerChecks" }
     buildFeatures { compose = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }

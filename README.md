@@ -7,7 +7,7 @@
 <p align="center">在 Android 上用一句话记下收支，再和喜欢的角色聊两句。</p>
 
 <p align="center">
-  <a href="https://github.com/Ethan-123321/whale-ledger/releases/download/v0.4.8/dafeiyu-0.4.8-debug.apk"><img src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-Android_APK-28796C?style=for-the-badge&amp;logo=android&amp;logoColor=white" alt="下载 Android 安装包 v0.4.8"></a>
+  <a href="https://github.com/Ethan-123321/whale-ledger/releases/download/v0.4.9/dafeiyu-0.4.9-debug.apk"><img src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-Android_APK-28796C?style=for-the-badge&amp;logo=android&amp;logoColor=white" alt="下载 Android 安装包 v0.4.9"></a>
 </p>
 
 <p align="center">

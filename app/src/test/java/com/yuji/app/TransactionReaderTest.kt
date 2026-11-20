@@ -31,6 +31,7 @@ class TransactionReaderTest {
         assertTrue((read("健身之后该休息吗？") as TransactionInput.Respond).conversation)
         assertTrue((read("如果明天练腿，今天应该休息吗？") as TransactionInput.Respond).conversation)
         assertEquals(TransactionInput.AskAi, read("加了份酱鸭，七块"))
+        assertEquals(TransactionInput.AskAi, read("面包一箱三十五"))
     }
 
     @Test fun distinctDaysAndMultipleAmounts() {
